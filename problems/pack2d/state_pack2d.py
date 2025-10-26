@@ -42,7 +42,7 @@ class PackAction():
         return torch.cat((self.updated_shape, self.x, self.y), dim=-1)
 
     def reset(self):
-        self.__init__(self.index.size(0))
+        self.__init__(self.index.size(0), self.index.device)
         
     def __call__(self):
         # (batch, 1)
@@ -224,8 +224,8 @@ class StatePack2D():
         position_size = self.skyline.size(1)
         batch_size = self.skyline.size(0)
 
-        in_left = torch.min(x.squeeze(-1), x.squeeze(-1) + inbox_width)
-        in_right = torch.max(x.squeeze(-1), x.squeeze(-1) + inbox_width)
+        in_left = x.squeeze(-1)
+        in_right = x.squeeze(-1) + inbox_width
 
         # print(in_left, in_right)
 
@@ -235,7 +235,7 @@ class StatePack2D():
 
         mask = torch.arange(0, position_size, device=self.device).repeat(batch_size,1)
         mask_left = mask.ge(left_idx)
-        mask_right = mask.le(right_idx)
+        mask_right = mask.lt(right_idx)
         mask = mask_left * mask_right
         masked_skyline = mask * self.skyline
         non_masked_skyline = (~mask) * self.skyline
@@ -256,8 +256,8 @@ class StatePack2D():
 
         inbox_width = self.action.get_packed()[:,0]
 
-        in_left = torch.min(x.squeeze(-1), x.squeeze(-1) + inbox_width)  # (batch)
-        in_right = torch.max(x.squeeze(-1), x.squeeze(-1) + inbox_width)
+        in_left = x.squeeze(-1)  # (batch)
+        in_right = x.squeeze(-1) + inbox_width
 
         box_width = self.packed_cat[:, :, 0]
         box_height = self.packed_cat[:, :, 1]
@@ -265,9 +265,9 @@ class StatePack2D():
         box_x = self.packed_cat[:, :, 2] # (batch, packed)
         box_y = self.packed_cat[:, :, 3]
 
-        box_left = torch.min(box_x, box_x + box_width) # (batch, packed)
-        box_right = torch.max(box_x, box_x + box_width)
-        box_top = torch.max(box_y, box_y + box_height)
+        box_left = box_x # (batch, packed)
+        box_right = box_x + box_width
+        box_top = box_y + box_height
         
         in_left = in_left.unsqueeze(-1).repeat([1, self.packed_cat.size()[1]]) # (batch, packed)
         in_right = in_right.unsqueeze(-1).repeat([1, self.packed_cat.size()[1]])

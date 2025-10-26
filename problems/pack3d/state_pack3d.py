@@ -51,7 +51,7 @@ class PackAction():
         return torch.cat((self.updated_shape, self.x, self.y, self.z), dim=-1)
 
     def reset(self):
-        self.__init__(self.index.size(0))
+        self.__init__(self.index.size(0), self.index.device)
 
     def __call__(self):
         return {'index': self.index,
@@ -194,30 +194,28 @@ class StatePack3D():
         for i in range(rotate_types):
             rotate_mask[i] = rotate.squeeze(-1).eq(i + 1)
 
-        # rotate in 5 directions one by one
-        # (x,y,z)->(y,x,z)
-        # (x,y,z)->(y,z,x)
-        # (x,y,z)->(z,y,x)
-        # (x,y,z)->(z,x,y)
-        # (x,y,z)->(x,z,y)
+        # Store the swapped dimensions (all rotations use same swap pattern)
+        box_l_rotate = box_width
+        box_w_rotate = box_length
+        box_h_rotate = box_height
+
+        # Initialize output with original dimensions
+        inbox_length = box_length.clone()
+        inbox_width = box_width.clone()
+        inbox_height = box_height.clone()
+
+        # Apply rotation to batch items that need it
         for i in range(rotate_types):
-            box_l_rotate = box_width
-            box_w_rotate = box_length
-            box_h_rotate = box_height
+            selected_l = torch.masked_select(box_l_rotate, rotate_mask[i])
+            selected_w = torch.masked_select(box_w_rotate, rotate_mask[i])
+            selected_h = torch.masked_select(box_h_rotate, rotate_mask[i])
 
-            box_l_rotate = torch.masked_select(
-                box_l_rotate, rotate_mask[i])
-            box_w_rotate = torch.masked_select(
-                box_w_rotate, rotate_mask[i])
-            box_h_rotate = torch.masked_select(
-                box_h_rotate, rotate_mask[i])
-
-            inbox_length = box_length.masked_scatter(
-                rotate_mask[i], box_l_rotate)
-            inbox_width = box_width.masked_scatter(
-                rotate_mask[i], box_w_rotate)
-            inbox_height = box_height.masked_scatter(
-                rotate_mask[i], box_h_rotate)
+            inbox_length = inbox_length.masked_scatter(
+                rotate_mask[i], selected_l)
+            inbox_width = inbox_width.masked_scatter(
+                rotate_mask[i], selected_w)
+            inbox_height = inbox_height.masked_scatter(
+                rotate_mask[i], selected_h)
 
         self.packed_rotate[torch.arange(0, rotate.size(
             0)), select_index.squeeze(-1), 0] = rotate.squeeze(-1)
@@ -257,10 +255,10 @@ class StatePack3D():
         position_size = self.skyline.size(1)
         batch_size = self.skyline.size(0)
 
-        in_back = torch.min(x.squeeze(-1), x.squeeze(-1) + inbox_length)
-        in_front = torch.max(x.squeeze(-1), x.squeeze(-1) + inbox_length)
-        in_left = torch.min(y.squeeze(-1), y.squeeze(-1) + inbox_width)
-        in_right = torch.max(y.squeeze(-1), y.squeeze(-1) + inbox_width)
+        in_back = x.squeeze(-1)
+        in_front = x.squeeze(-1) + inbox_length
+        in_left = y.squeeze(-1)
+        in_right = y.squeeze(-1) + inbox_width
 
         back_idx = ((in_back + 1.0) * (position_size / 2)
                     ).floor().long().unsqueeze(-1)
@@ -277,9 +275,9 @@ class StatePack3D():
             0, position_size, device=self.device).repeat(batch_size, 1)
 
         mask_back = mask_x.ge(back_idx)
-        mask_front = mask_x.le(front_idx)
+        mask_front = mask_x.lt(front_idx)
         mask_left = mask_y.ge(left_idx)
-        mask_right = mask_y.le(right_idx)
+        mask_right = mask_y.lt(right_idx)
 
         mask_x = mask_back * mask_front
         mask_y = mask_left * mask_right
@@ -309,10 +307,10 @@ class StatePack3D():
         inbox_length = self.action.get_packed()[:, 0]
         inbox_width = self.action.get_packed()[:, 1]
 
-        in_back = torch.min(x.squeeze(-1), x.squeeze(-1) + inbox_length)
-        in_front = torch.max(x.squeeze(-1), x.squeeze(-1) + inbox_length)
-        in_left = torch.min(y.squeeze(-1), y.squeeze(-1) + inbox_width)
-        in_right = torch.max(y.squeeze(-1), y.squeeze(-1) + inbox_width)
+        in_back = x.squeeze(-1)
+        in_front = x.squeeze(-1) + inbox_length
+        in_left = y.squeeze(-1)
+        in_right = y.squeeze(-1) + inbox_width
 
         box_length = self.packed_cat[:, :, 0]
         box_width = self.packed_cat[:, :, 1]
@@ -322,11 +320,11 @@ class StatePack3D():
         box_y = self.packed_cat[:, :, 4]
         box_z = self.packed_cat[:, :, 5]
 
-        box_back = torch.min(box_x, box_x + box_length)
-        box_front = torch.max(box_x, box_x + box_length)
-        box_left = torch.min(box_y, box_y + box_width)
-        box_right = torch.max(box_y, box_y + box_width)
-        box_top = torch.max(box_z, box_z + box_height)
+        box_back = box_x
+        box_front = box_x + box_length
+        box_left = box_y
+        box_right = box_y + box_width
+        box_top = box_z + box_height
 
         in_back = in_back.unsqueeze(-1).repeat([1, self.packed_cat.size()[1]])
         in_front = in_front.unsqueeze(-1).repeat(
